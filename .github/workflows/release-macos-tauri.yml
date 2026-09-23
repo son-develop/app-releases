@@ -102,6 +102,7 @@ jobs:
           PRODUCT: ${{ inputs.product-name }}
           TARGET: ${{ inputs.target }}
           BUNDLE_ROOT: ${{ inputs.bundle-dir }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           BUNDLE_DIR="${BUNDLE_ROOT}/${TARGET}/release/bundle/macos"
@@ -120,6 +121,19 @@ jobs:
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           SIGNATURE="$(cat "$SIG")"
 
+          # **이미 올라간 안내문을 읽어 병합한다.** 새로 쓰면 다른 판(windows-x86_64)이
+          # 지워진다. 그러면 두 잡의 순서가 결과를 바꾸게 되고, 그 순서를 사람이
+          # 기억해야 하는 짐이 남는다. 병합하면 어느 쪽이 먼저 돌든 같다
+          #
+          # 판 번호가 다르면 이어받지 않는다 - 옛 판의 자산을 새 안내문이 가리키게 된다
+          PREV='{}'
+          if gh release download "$APP_SLUG" --repo "$RELEASE_REPO" \
+               --pattern latest.json --dir prev >/dev/null 2>&1; then
+            if [ "$(jq -r '.version // ""' prev/latest.json)" = "$VERSION" ]; then
+              PREV="$(jq -c '.platforms // {}' prev/latest.json)"
+            fi
+          fi
+
           jq -n \
             --arg version "$VERSION" \
             --arg notes   "${PRODUCT} ${VERSION}" \
@@ -127,8 +141,9 @@ jobs:
             --arg plat    "$PLATFORM" \
             --arg sig     "$SIGNATURE" \
             --arg url     "$URL" \
+            --argjson prev "$PREV" \
             '{version:$version, notes:$notes, pub_date:$pub,
-              platforms: { ($plat): { signature:$sig, url:$url } } }' \
+              platforms: ($prev + { ($plat): { signature:$sig, url:$url } }) }' \
             > latest.json
 
           echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
