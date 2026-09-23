@@ -55,9 +55,9 @@ on:
 
 jobs:
   build-and-publish:
-    # 자가호스팅 러너 사용. ⚠️ macOS/애플실리콘 러너에 걸려야 합니다.
-    # 다른 OS 자가호스팅 러너가 있으면 라벨로 고정하세요: [self-hosted, macOS, ARM64]
-    runs-on: self-hosted
+    # macOS 앱 빌드는 반드시 macOS/애플실리콘 러너에서. Linux 러너는 절대 성공 못 함.
+    # 라벨로 고정 (macOS ARM 러너는 macOS, ARM64 라벨이 기본으로 붙음).
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout source (this caller repo = private source)
         uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22   # pnpm 11 / node:sqlite 는 Node >=22.13 필요
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
