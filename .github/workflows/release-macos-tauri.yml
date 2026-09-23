@@ -47,7 +47,9 @@ on:
 
 jobs:
   build-and-publish:
-    runs-on: macos-14
+    # 자가호스팅 러너 사용. ⚠️ macOS/애플실리콘 러너에 걸려야 합니다.
+    # 다른 OS 자가호스팅 러너가 있으면 라벨로 고정하세요: [self-hosted, macOS, ARM64]
+    runs-on: self-hosted
     steps:
       - name: Checkout source (this caller repo = private source)
         uses: actions/checkout@v4
