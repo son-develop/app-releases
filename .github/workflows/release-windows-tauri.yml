@@ -1,0 +1,152 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 통합 재사용 워크플로우 — Windows (Tauri) 버전
+#   경로: .github/workflows/release-windows-tauri.yml  (son-develop/app-releases)
+#
+# macOS 버전과 같은 앱의 **같은 고정 태그 Release** 에 게시합니다.
+# 단, Windows 는 NSIS 설치본(*-setup.exe)+.sig 를 올리고, latest.json 의
+# `platforms.windows-x86_64` 만 갱신합니다. **기존 latest.json 을 읽어 병합**하므로
+# macOS 엔트리(darwin-aarch64)를 덮어쓰지 않습니다. (한 매니페스트에 두 플랫폼 공존)
+# ─────────────────────────────────────────────────────────────────────────────
+name: release-windows-tauri (reusable, shared repo)
+
+on:
+  workflow_call:
+    inputs:
+      release-repo:
+        description: "공유 배포 저장소 (예: son-develop/app-releases)"
+        required: true
+        type: string
+      app-slug:
+        description: "앱 고정 식별자 = 고정 태그 = 엔드포인트 경로 (예: githand)"
+        required: true
+        type: string
+      product-name:
+        required: false
+        type: string
+        default: ""
+      target:
+        description: "Rust 타깃"
+        required: false
+        type: string
+        default: "x86_64-pc-windows-msvc"
+      frontend-build:
+        required: false
+        type: string
+        default: "npm ci && npm run build"
+      bundle-dir:
+        description: "번들이 쌓이는 자리. Cargo 워크스페이스면 target"
+        required: false
+        type: string
+        default: "src-tauri/target"
+      installer-glob:
+        description: "업데이터 설치본 패턴. NSIS 기본. MSI 면 *.msi"
+        required: false
+        type: string
+        default: "*-setup.exe"
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
+      RELEASE_TOKEN:
+        required: true
+
+jobs:
+  build-and-publish:
+    # Windows 자가호스팅 러너. 다른 OS 에 안 잡히게 라벨로 고정.
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.target }}
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build frontend
+        shell: bash
+        run: ${{ inputs.frontend-build }}
+
+      # tauri.conf.json 에 "bundle": { "createUpdaterArtifacts": true } 필요.
+      # Windows 링커(link.exe)는 러너에 VS C++ Build Tools 가 있어야 합니다.
+      - name: Build & sign Tauri app
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --target ${{ inputs.target }}
+
+      # 산출물 수집 + latest.json 병합 + 게시 (PowerShell: Windows 네이티브, jq 불필요)
+      - name: Collect, merge manifest, publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_REPO: ${{ inputs.release-repo }}
+          APP_SLUG: ${{ inputs.app-slug }}
+          PRODUCT: ${{ inputs.product-name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUNDLE_ROOT: ${{ inputs.bundle-dir }}
+          INSTALLER_GLOB: ${{ inputs.installer-glob }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $installer = Get-ChildItem -Path $env:BUNDLE_ROOT -Recurse -Filter $env:INSTALLER_GLOB -File | Select-Object -First 1
+          if (-not $installer) { throw "설치본 없음: '$env:INSTALLER_GLOB' under '$env:BUNDLE_ROOT'" }
+          $sigPath = "$($installer.FullName).sig"
+          if (-not (Test-Path $sigPath)) { throw "서명 없음: $sigPath (createUpdaterArtifacts=true 확인)" }
+
+          $signature = (Get-Content -Raw $sigPath).Trim()
+          $asset = $installer.Name
+          $url = "https://github.com/$($env:RELEASE_REPO)/releases/download/$($env:APP_SLUG)/$asset"
+          $platformKey = "windows-x86_64"
+
+          # 기존 latest.json 을 받아 다른 플랫폼(예: darwin-aarch64) 엔트리를 보존한다.
+          $platforms = @{}
+          New-Item -ItemType Directory -Force -Path prev | Out-Null
+          gh release download $env:APP_SLUG --repo $env:RELEASE_REPO --pattern latest.json --dir prev 2>$null
+          if (Test-Path prev/latest.json) {
+            $existing = Get-Content -Raw prev/latest.json | ConvertFrom-Json
+            # 같은 버전일 때만 병합. 버전이 다르면 새 릴리스이므로 새로 시작한다.
+            if ($existing.version -eq $env:VERSION -and $existing.platforms) {
+              foreach ($p in $existing.platforms.PSObject.Properties) {
+                $platforms[$p.Name] = @{ signature = $p.Value.signature; url = $p.Value.url }
+              }
+            }
+          }
+          $platforms[$platformKey] = @{ signature = $signature; url = $url }
+
+          $manifest = [ordered]@{
+            version   = $env:VERSION
+            notes     = "$($env:PRODUCT) $($env:VERSION)"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = $platforms
+          }
+          # BOM 없이 UTF-8 로 기록 (Tauri JSON 파서 호환)
+          [System.IO.File]::WriteAllText("$PWD/latest.json", ($manifest | ConvertTo-Json -Depth 8))
+          Get-Content latest.json
+
+          # 앱별 고정 태그 Release 에 덮어쓰기 게시
+          gh release view $env:APP_SLUG --repo $env:RELEASE_REPO *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit   $env:APP_SLUG --repo $env:RELEASE_REPO --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)"
+            gh release upload $env:APP_SLUG --repo $env:RELEASE_REPO --clobber $installer.FullName $sigPath latest.json
+          } else {
+            gh release create $env:APP_SLUG --repo $env:RELEASE_REPO --latest=false --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)" $installer.FullName $sigPath latest.json
+          }
