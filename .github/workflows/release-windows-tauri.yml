@@ -75,10 +75,13 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ inputs.target }}
+      # dtolnay/rust-toolchain 은 내부적으로 shell: bash 를 쓴다. 이 러너는 System32 의
+      # WSL bash 가 잡혀 execvpe(/bin/bash) 로 깨지므로, 러너에 설치된 rustup 을 직접 쓴다.
+      - name: Setup Rust target
+        shell: cmd
+        run: |
+          rustup default stable || exit /b 1
+          rustup target add ${{ inputs.target }} || exit /b 1
 
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
