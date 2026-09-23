@@ -142,16 +142,25 @@ jobs:
           $url = "https://github.com/$($env:RELEASE_REPO)/releases/download/$($env:APP_SLUG)/$asset"
           $platformKey = "windows-x86_64"
 
-          # 기존 latest.json 을 받아 다른 플랫폼(예: darwin-aarch64) 엔트리를 보존한다.
+          # gh 프로브는 릴리스가 없을 때 stderr 를 내는데, Stop 하에선 이게 예외로 던져진다.
+          # 여기부터는 Continue 로 두고 종료코드로만 판단한다.
+          $ErrorActionPreference = "Continue"
+
+          # 릴리스 존재 여부 (없으면 exit!=0, 예외 대신 종료코드로)
+          gh release view $env:APP_SLUG --repo $env:RELEASE_REPO --json tagName 1>$null 2>$null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+
+          # 있으면 기존 latest.json 을 받아 다른 플랫폼(darwin-aarch64 등) 엔트리 보존
           $platforms = @{}
-          New-Item -ItemType Directory -Force -Path prev | Out-Null
-          gh release download $env:APP_SLUG --repo $env:RELEASE_REPO --pattern latest.json --dir prev 2>$null
-          if (Test-Path prev/latest.json) {
-            $existing = Get-Content -Raw prev/latest.json | ConvertFrom-Json
-            # 같은 버전일 때만 병합. 버전이 다르면 새 릴리스이므로 새로 시작한다.
-            if ($existing.version -eq $env:VERSION -and $existing.platforms) {
-              foreach ($p in $existing.platforms.PSObject.Properties) {
-                $platforms[$p.Name] = @{ signature = $p.Value.signature; url = $p.Value.url }
+          if ($releaseExists) {
+            New-Item -ItemType Directory -Force -Path prev | Out-Null
+            gh release download $env:APP_SLUG --repo $env:RELEASE_REPO --pattern latest.json --dir prev 1>$null 2>$null
+            if (Test-Path prev/latest.json) {
+              $existing = Get-Content -Raw prev/latest.json | ConvertFrom-Json
+              if ($existing.version -eq $env:VERSION -and $existing.platforms) {
+                foreach ($p in $existing.platforms.PSObject.Properties) {
+                  $platforms[$p.Name] = @{ signature = $p.Value.signature; url = $p.Value.url }
+                }
               }
             }
           }
@@ -168,10 +177,10 @@ jobs:
           Get-Content latest.json
 
           # 앱별 고정 태그 Release 에 덮어쓰기 게시
-          gh release view $env:APP_SLUG --repo $env:RELEASE_REPO *> $null
-          if ($LASTEXITCODE -eq 0) {
+          if ($releaseExists) {
             gh release edit   $env:APP_SLUG --repo $env:RELEASE_REPO --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)"
             gh release upload $env:APP_SLUG --repo $env:RELEASE_REPO --clobber $installer.FullName $sigPath latest.json
           } else {
             gh release create $env:APP_SLUG --repo $env:RELEASE_REPO --latest=false --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)" $installer.FullName $sigPath latest.json
           }
+          if ($LASTEXITCODE -ne 0) { throw "release 게시 실패 (exit $LASTEXITCODE)" }
