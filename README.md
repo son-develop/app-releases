@@ -12,7 +12,7 @@
 - 업데이터 엔드포인트(앱별 고정):
 
   ```
-  https://github.com/SonSangGi/app-releases/releases/download/<app-slug>/latest.json
+  https://github.com/son-develop/app-releases/releases/download/<app-slug>/latest.json
   ```
 
   GitHub 의 `/releases/latest/` 별칭을 쓰지 않으므로 앱끼리 섞이지 않습니다.
@@ -27,9 +27,9 @@
 ```yaml
 jobs:
   release:
-    uses: SonSangGi/app-releases/.github/workflows/release-macos-tauri.yml@main
+    uses: son-develop/app-releases/.github/workflows/release-macos-tauri.yml@main
     with:
-      release-repo: SonSangGi/app-releases
+      release-repo: son-develop/app-releases
       app-slug: githand
       product-name: GitHand
     secrets: inherit
