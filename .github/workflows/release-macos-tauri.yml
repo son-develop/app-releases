@@ -37,6 +37,14 @@ on:
         required: false
         type: string
         default: "npm ci && npm run build"
+      bundle-dir:
+        # Cargo 워크스페이스에 src-tauri 가 들어 있으면 산출물이 뿌리 target/ 에 쌓인다.
+        # 그 경우 "target" 을 넘긴다. **빌드는 성공하고 그다음 ls 에서 빈손이 되므로**
+        # 틀리면 한참 뒤에야 드러난다
+        description: "번들이 쌓이는 자리. Cargo 워크스페이스면 target"
+        required: false
+        type: string
+        default: "src-tauri/target"
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: true
@@ -93,9 +101,10 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           PRODUCT: ${{ inputs.product-name }}
           TARGET: ${{ inputs.target }}
+          BUNDLE_ROOT: ${{ inputs.bundle-dir }}
         run: |
           set -euo pipefail
-          BUNDLE_DIR="src-tauri/target/${TARGET}/release/bundle/macos"
+          BUNDLE_DIR="${BUNDLE_ROOT}/${TARGET}/release/bundle/macos"
           TARGZ="$(ls "$BUNDLE_DIR"/*.app.tar.gz | head -n1)"
           SIG="${TARGZ}.sig"
           ASSET="$(basename "$TARGZ")"       # 예: GitHand.app.tar.gz

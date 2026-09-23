@@ -32,6 +32,9 @@ jobs:
       release-repo: son-develop/app-releases
       app-slug: githand
       product-name: GitHand
+      # Cargo 워크스페이스에 src-tauri 가 들어 있으면 산출물이 뿌리에 쌓인다
+      bundle-dir: target
+      frontend-build: pnpm install --frozen-lockfile && pnpm build
     secrets: inherit
 ```
 
