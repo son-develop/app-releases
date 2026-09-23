@@ -59,11 +59,12 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # Windows 러너에서는 shell: bash 가 WSL bash 로 잡혀 깨진다. pwsh 로 통일한다.
       - name: Resolve version
         id: meta
-        shell: bash
+        shell: pwsh
         run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          "version=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -81,13 +82,13 @@ jobs:
           workspaces: src-tauri
 
       - name: Build frontend
-        shell: bash
+        shell: pwsh
         run: ${{ inputs.frontend-build }}
 
       # tauri.conf.json 에 "bundle": { "createUpdaterArtifacts": true } 필요.
       # Windows 링커(link.exe)는 러너에 VS C++ Build Tools 가 있어야 합니다.
       - name: Build & sign Tauri app
-        shell: bash
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
