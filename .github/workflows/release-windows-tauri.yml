@@ -75,13 +75,28 @@ jobs:
         with:
           node-version: 22
 
-      # dtolnay/rust-toolchain 은 내부적으로 shell: bash 를 쓴다. 이 러너는 System32 의
-      # WSL bash 가 잡혀 execvpe(/bin/bash) 로 깨지므로, 러너에 설치된 rustup 을 직접 쓴다.
-      - name: Setup Rust target
-        shell: cmd
+      # dtolnay/rust-toolchain 은 내부 shell: bash(WSL) 로 깨지므로 안 쓴다.
+      # rustup 이 없으면 설치하고, 타깃을 추가한다. (powershell 은 실행정책 우회)
+      - name: Setup Rust
+        shell: powershell -ExecutionPolicy Bypass -NoProfile -File {0}
+        env:
+          TARGET: ${{ inputs.target }}
         run: |
-          rustup default stable || exit /b 1
-          rustup target add ${{ inputs.target }} || exit /b 1
+          $ErrorActionPreference = "Stop"
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          $rustup = Join-Path $cargoBin "rustup.exe"
+          if (-not (Test-Path $rustup) -and -not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Write-Host "rustup 없음 → 설치"
+            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile "$env:TEMP\rustup-init.exe"
+            & "$env:TEMP\rustup-init.exe" -y --default-toolchain stable --profile minimal
+            if ($LASTEXITCODE -ne 0) { throw "rustup 설치 실패" }
+            # 이후 스텝(cargo/tauri)이 찾도록 PATH 에 추가
+            Add-Content -Path $env:GITHUB_PATH -Value $cargoBin
+          }
+          if (-not (Test-Path $rustup)) { $rustup = "rustup" }
+          & $rustup default stable
+          & $rustup target add $env:TARGET
+          if ($LASTEXITCODE -ne 0) { throw "target add 실패" }
 
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
