@@ -90,13 +90,14 @@ jobs:
             Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile "$env:TEMP\rustup-init.exe"
             & "$env:TEMP\rustup-init.exe" -y --default-toolchain stable --profile minimal
             if ($LASTEXITCODE -ne 0) { throw "rustup 설치 실패" }
-            # 이후 스텝(cargo/tauri)이 찾도록 PATH 에 추가
-            Add-Content -Path $env:GITHUB_PATH -Value $cargoBin
           }
           if (-not (Test-Path $rustup)) { $rustup = "rustup" }
           & $rustup default stable
           & $rustup target add $env:TARGET
           if ($LASTEXITCODE -ne 0) { throw "target add 실패" }
+          # cargo/rustc 가 이후 스텝(rust-cache, tauri build) PATH 에 항상 있도록.
+          # (설치했든 이미 있었든 무조건 추가)
+          if (Test-Path $cargoBin) { Add-Content -Path $env:GITHUB_PATH -Value $cargoBin }
 
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
