@@ -37,6 +37,13 @@ on:
         required: false
         type: string
         default: "npm ci && npm run build"
+      release-notes:
+        # **비우면 지금까지와 똑같다** (`<앱이름> <판>`). 적으면 앱의 업데이트 팝업에
+        # 그대로 나오므로 사람이 읽을 말로 적는다 (보통 주석 붙인 태그의 본문)
+        description: "업데이트 팝업과 릴리스에 적을 바뀐 것. 비우면 `<제품> <판>`"
+        required: false
+        type: string
+        default: ""
       bundle-dir:
         # Cargo 워크스페이스에 src-tauri 가 들어 있으면 산출물이 뿌리 target/ 에 쌓인다.
         # 그 경우 "target" 을 넘긴다. **빌드는 성공하고 그다음 ls 에서 빈손이 되므로**
@@ -102,6 +109,7 @@ jobs:
           PRODUCT: ${{ inputs.product-name }}
           TARGET: ${{ inputs.target }}
           BUNDLE_ROOT: ${{ inputs.bundle-dir }}
+          NOTES: ${{ inputs.release-notes }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
@@ -136,7 +144,7 @@ jobs:
 
           jq -n \
             --arg version "$VERSION" \
-            --arg notes   "${PRODUCT} ${VERSION}" \
+            --arg notes   "${NOTES:-${PRODUCT} ${VERSION}}" \
             --arg pub     "$PUB_DATE" \
             --arg plat    "$PLATFORM" \
             --arg sig     "$SIGNATURE" \
@@ -160,16 +168,18 @@ jobs:
           APP_SLUG: ${{ inputs.app-slug }}
           PRODUCT: ${{ inputs.product-name }}
           VERSION: ${{ steps.meta.outputs.version }}
+          NOTES: ${{ inputs.release-notes }}
         run: |
           set -euo pipefail
+          BODY="${NOTES:-${PRODUCT} ${VERSION}}"
           if gh release view "$APP_SLUG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
             gh release edit "$APP_SLUG" --repo "$RELEASE_REPO" \
-              --title "${PRODUCT} (latest)" --notes "${PRODUCT} ${VERSION}"
+              --title "${PRODUCT} (latest)" --notes "$BODY"
             gh release upload "$APP_SLUG" --repo "$RELEASE_REPO" --clobber \
               "${{ steps.pack.outputs.targz }}" "${{ steps.pack.outputs.sig }}" latest.json
           else
             # --latest=false : 저장소 전체 "Latest" 배지를 특정 앱이 차지하지 않게
             gh release create "$APP_SLUG" --repo "$RELEASE_REPO" --latest=false \
-              --title "${PRODUCT} (latest)" --notes "${PRODUCT} ${VERSION}" \
+              --title "${PRODUCT} (latest)" --notes "$BODY" \
               "${{ steps.pack.outputs.targz }}" "${{ steps.pack.outputs.sig }}" latest.json
           fi

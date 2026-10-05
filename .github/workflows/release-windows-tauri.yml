@@ -33,6 +33,13 @@ on:
         required: false
         type: string
         default: "npm ci && npm run build"
+      release-notes:
+        # **비우면 지금까지와 똑같다** (`<앱이름> <판>`). 적으면 앱의 업데이트 팝업에
+        # 그대로 나오므로 사람이 읽을 말로 적는다 (보통 주석 붙인 태그의 본문)
+        description: "업데이트 팝업과 릴리스에 적을 바뀐 것. 비우면 `<제품> <판>`"
+        required: false
+        type: string
+        default: ""
       bundle-dir:
         description: "번들이 쌓이는 자리. Cargo 워크스페이스면 target"
         required: false
@@ -122,6 +129,7 @@ jobs:
       - name: Collect, merge manifest, publish
         shell: powershell -ExecutionPolicy Bypass -NoProfile -File {0}
         env:
+          NOTES: ${{ inputs.release-notes }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RELEASE_REPO: ${{ inputs.release-repo }}
           APP_SLUG: ${{ inputs.app-slug }}
@@ -166,9 +174,12 @@ jobs:
           }
           $platforms[$platformKey] = @{ signature = $signature; url = $url }
 
+          # 비어 있으면 지금까지와 같은 `<제품> <판>`
+          $body = if ([string]::IsNullOrWhiteSpace($env:NOTES)) { "$($env:PRODUCT) $($env:VERSION)" } else { $env:NOTES }
+
           $manifest = [ordered]@{
             version   = $env:VERSION
-            notes     = "$($env:PRODUCT) $($env:VERSION)"
+            notes     = $body
             pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             platforms = $platforms
           }
@@ -178,9 +189,9 @@ jobs:
 
           # 앱별 고정 태그 Release 에 덮어쓰기 게시
           if ($releaseExists) {
-            gh release edit   $env:APP_SLUG --repo $env:RELEASE_REPO --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)"
+            gh release edit   $env:APP_SLUG --repo $env:RELEASE_REPO --title "$($env:PRODUCT) (latest)" --notes "$body"
             gh release upload $env:APP_SLUG --repo $env:RELEASE_REPO --clobber $installer.FullName $sigPath latest.json
           } else {
-            gh release create $env:APP_SLUG --repo $env:RELEASE_REPO --latest=false --title "$($env:PRODUCT) (latest)" --notes "$($env:PRODUCT) $($env:VERSION)" $installer.FullName $sigPath latest.json
+            gh release create $env:APP_SLUG --repo $env:RELEASE_REPO --latest=false --title "$($env:PRODUCT) (latest)" --notes "$body" $installer.FullName $sigPath latest.json
           }
           if ($LASTEXITCODE -ne 0) { throw "release 게시 실패 (exit $LASTEXITCODE)" }
